@@ -39,6 +39,8 @@ interface Player extends Entity {
   combo: number
   comboTimer: number
   critChance: number
+  dashTimer: number
+  dashDirection: Vector2
 }
 
 interface Enemy extends Entity {
@@ -203,7 +205,7 @@ interface Inventory {
   trinket: GameItem | null
   curse: GameItem | null
   consumables: (GameItem | null)[] // 4 slots
-  backpack: GameItem[] // 8 slots
+  backpack: (GameItem | null)[] // 8 slots
 }
 
 // Player skills
@@ -1650,7 +1652,86 @@ export default function Game() {
   const [itemChoice, setItemChoice] = useState<GameItem[]>([])
   const [showItemChoice, setShowItemChoice] = useState(false)
   const [activeSynergies, setActiveSynergies] = useState<ActiveSynergy[]>([])
+  const [selectedSlot, setSelectedSlot] = useState<{ category: string, index?: number } | null>(null)
+  const [inventoryVersion, setInventoryVersion] = useState(0)
   
+  const handleSlotClick = useCallback((category: string, index?: number) => {
+    const inventory = inventoryRef.current
+
+    if (!selectedSlot) {
+      // Select the slot if it has an item
+      let item = null
+      if (category === 'weapon') item = inventory.weapon
+      else if (category === 'artifacts') item = inventory.artifacts[index!]
+      else if (category === 'trinket') item = inventory.trinket
+      else if (category === 'curse') item = inventory.curse
+      else if (category === 'consumables') item = inventory.consumables[index!]
+      else if (category === 'backpack') item = inventory.backpack[index!]
+
+      if (item) {
+        setSelectedSlot({ category, index })
+      }
+      return
+    }
+
+    // Swapping logic
+    if (selectedSlot.category === category && selectedSlot.index === index) {
+      setSelectedSlot(null)
+      return
+    }
+
+    // Helper to get item from a slot
+    const getItemAt = (cat: string, idx?: number) => {
+      if (cat === 'weapon') return inventory.weapon
+      if (cat === 'artifacts') return inventory.artifacts[idx!]
+      if (cat === 'trinket') return inventory.trinket
+      if (cat === 'curse') return inventory.curse
+      if (cat === 'consumables') return inventory.consumables[idx!]
+      if (cat === 'backpack') return inventory.backpack[idx!]
+      return null
+    }
+
+    // Helper to set item in a slot
+    const setItemAt = (cat: string, item: GameItem | null, idx?: number) => {
+      if (cat === 'weapon') inventory.weapon = item
+      else if (cat === 'artifacts') inventory.artifacts[idx!] = item
+      else if (cat === 'trinket') inventory.trinket = item
+      else if (cat === 'curse') inventory.curse = item
+      else if (cat === 'consumables') inventory.consumables[idx!] = item
+      else if (cat === 'backpack') inventory.backpack[idx!] = item
+    }
+
+    const item1 = getItemAt(selectedSlot.category, selectedSlot.index)
+    const item2 = getItemAt(category, index)
+
+    // Validation: Check if item1 can go into category
+    if (item1 && category !== 'backpack') {
+        if (category === 'weapon' && item1.category !== 'weapon') return
+        if (category === 'artifacts' && item1.category !== 'artifact') return
+        if (category === 'trinket' && item1.category !== 'trinket') return
+        if (category === 'curse' && item1.category !== 'curse') return
+        if (category === 'consumables' && item1.category !== 'consumable') return
+    }
+    
+    // Validation: Check if item2 can go into selectedSlot.category
+    if (item2 && selectedSlot.category !== 'backpack') {
+        if (selectedSlot.category === 'weapon' && item2.category !== 'weapon') return
+        if (selectedSlot.category === 'artifacts' && item2.category !== 'artifact') return
+        if (selectedSlot.category === 'trinket' && item2.category !== 'trinket') return
+        if (selectedSlot.category === 'curse' && item2.category !== 'curse') return
+        if (selectedSlot.category === 'consumables' && item2.category !== 'consumable') return
+    }
+
+    // Swap
+    setItemAt(selectedSlot.category, item2, selectedSlot.index)
+    setItemAt(category, item1, index)
+
+    setSelectedSlot(null)
+    setInventoryVersion(v => v + 1)
+    recalculateStats()
+    checkSynergies()
+  }, [selectedSlot, recalculateStats, checkSynergies])
+
   // Inventory ref (persists across floors)
   const inventoryRef = useRef<Inventory>({
     weapon: null,
@@ -1658,7 +1739,7 @@ export default function Game() {
     trinket: null,
     curse: null,
     consumables: [null, null, null, null],
-    backpack: []
+    backpack: [null, null, null, null, null, null, null, null]
   })
   
   // Skills ref
@@ -1724,7 +1805,8 @@ export default function Game() {
     facing: { x: 1, y: 0 },
     isAttacking: false, attackFrame: 0,
     souls: 0, hasKey: false,
-    combo: 0, comboTimer: 0, critChance: 0.05
+    combo: 0, comboTimer: 0, critChance: 0.05,
+    dashTimer: 0, dashDirection: { x: 0, y: 0 }
   })
 
   const tilesRef = useRef<Tile[][]>([])
@@ -2136,7 +2218,8 @@ export default function Game() {
       isAttacking: false, attackFrame: 0,
       souls: 0, hasKey: false,
       combo: 0, comboTimer: 0, 
-      critChance: DIFFICULTY.playerBaseCritChance
+      critChance: DIFFICULTY.playerBaseCritChance,
+      dashTimer: 0, dashDirection: { x: 0, y: 0 }
     }
     
     // Reset inventory
@@ -2146,7 +2229,7 @@ export default function Game() {
       trinket: null,
       curse: null,
       consumables: [null, null, null, null],
-      backpack: []
+      backpack: [null, null, null, null, null, null, null, null]
     }
     
     // Reset skills
@@ -2402,10 +2485,14 @@ export default function Game() {
   const equipItem = useCallback((item: GameItem) => {
     const inventory = inventoryRef.current
     
+    // Helper to find first empty slot in backpack
+    const findEmptyBackpackSlot = () => inventory.backpack.findIndex(s => s === null)
+
     if (item.category === 'weapon') {
       // Move existing weapon to backpack if any
       if (inventory.weapon) {
-        inventory.backpack.push(inventory.weapon)
+        const slot = findEmptyBackpackSlot()
+        if (slot >= 0) inventory.backpack[slot] = inventory.weapon
       }
       inventory.weapon = item
     } else if (item.category === 'artifact') {
@@ -2415,16 +2502,19 @@ export default function Game() {
         inventory.artifacts[emptySlot] = item
       } else {
         // All slots full, add to backpack
-        inventory.backpack.push(item)
+        const slot = findEmptyBackpackSlot()
+        if (slot >= 0) inventory.backpack[slot] = item
       }
     } else if (item.category === 'trinket') {
       if (inventory.trinket) {
-        inventory.backpack.push(inventory.trinket)
+        const slot = findEmptyBackpackSlot()
+        if (slot >= 0) inventory.backpack[slot] = inventory.trinket
       }
       inventory.trinket = item
     } else if (item.category === 'curse') {
       if (inventory.curse) {
-        inventory.backpack.push(inventory.curse)
+        const slot = findEmptyBackpackSlot()
+        if (slot >= 0) inventory.backpack[slot] = inventory.curse
       }
       inventory.curse = item
     } else if (item.category === 'consumable') {
@@ -2432,7 +2522,8 @@ export default function Game() {
       if (emptySlot >= 0) {
         inventory.consumables[emptySlot] = item
       } else {
-        inventory.backpack.push(item)
+        const slot = findEmptyBackpackSlot()
+        if (slot >= 0) inventory.backpack[slot] = item
       }
     }
     
@@ -2476,6 +2567,18 @@ export default function Game() {
     const player = playerRef.current
     const enemies = enemiesRef.current
     
+    // ===== NEW: Show use indicator =====
+    floatingTextsRef.current.push({
+      x: player.x,
+      y: player.y - 20,
+      text: `Used ${consumable.name}`,
+      color: consumable.rarity === 'legendary' ? '#ff00ff' : '#ffffff',
+      life: 1.0,
+      maxLife: 1.0,
+      velocityY: -30
+    })
+    playSound('levelup') // Use levelup sound as a "special use" sound
+
     // Execute consumable effect
     for (const effect of consumable.effects) {
       if (effect.type === 'active') {
@@ -2688,9 +2791,16 @@ export default function Game() {
       }
 
       // Apply velocity with speed modifiers
-      const speedMult = statModifiersRef.current.speedMultiplier
-      player.velocityX = moveX * player.speed * speedMult
-      player.velocityY = moveY * player.speed * speedMult
+      if (player.dashTimer > 0) {
+        player.dashTimer -= dt
+        const dashSpeed = player.speed * DIFFICULTY.dashSpeedMultiplier
+        player.velocityX = player.dashDirection.x * dashSpeed
+        player.velocityY = player.dashDirection.y * dashSpeed
+      } else {
+        const speedMult = statModifiersRef.current.speedMultiplier
+        player.velocityX = moveX * player.speed * speedMult
+        player.velocityY = moveY * player.speed * speedMult
+      }
 
       // ===== PRODUCTION: Touch attack/dash handling =====
       if (touchAttackRef.current && player.attackCooldown <= 0) {
@@ -2702,8 +2812,9 @@ export default function Game() {
 
       // Dash - uses difficulty config values
       if (keys.has('shift') && player.dashCooldown <= 0 && player.mana >= DIFFICULTY.dashManaCost) {
-        player.velocityX *= DIFFICULTY.dashSpeedMultiplier
-        player.velocityY *= DIFFICULTY.dashSpeedMultiplier
+        // Dash in facing direction (works even when stationary)
+        player.dashTimer = 0.2 // Dash lasts for 0.2 seconds
+        player.dashDirection = { x: player.facing.x, y: player.facing.y }
         player.dashCooldown = DIFFICULTY.dashCooldown
         player.mana -= DIFFICULTY.dashManaCost
         player.invincibleTime = DIFFICULTY.invincibilityDuration
@@ -5602,13 +5713,76 @@ export default function Game() {
         ctx.textAlign = 'left'
       }
       
-      // Controls hint
+      // ===== MINECRAFT-STYLE CONSUMABLE HOTBAR =====
+      const hotbarSlotSize = 50
+      const hotbarPadding = 4
+      const hotbarSlots = 4
+      const hotbarWidth = (hotbarSlotSize + hotbarPadding) * hotbarSlots + hotbarPadding
+      const hotbarX = (width - hotbarWidth) / 2
+      const hotbarY = height - 70
+
+      // Hotbar background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+      ctx.fillRect(hotbarX - 5, hotbarY - 5, hotbarWidth + 10, hotbarSlotSize + 20)
+
+      // Draw each consumable slot
+      const inventory = inventoryRef.current
+      for (let i = 0; i < hotbarSlots; i++) {
+        const slotX = hotbarX + i * (hotbarSlotSize + hotbarPadding) + hotbarPadding
+        const slotY = hotbarY
+        const consumable = inventory.consumables[i]
+
+        // Slot background
+        ctx.fillStyle = 'rgba(50, 50, 60, 0.8)'
+        ctx.fillRect(slotX, slotY, hotbarSlotSize, hotbarSlotSize)
+
+        // Slot border
+        ctx.strokeStyle = consumable ? '#ffd700' : '#444466'
+        ctx.lineWidth = 2
+        ctx.strokeRect(slotX, slotY, hotbarSlotSize, hotbarSlotSize)
+
+        // Keybinding indicator
+        ctx.fillStyle = '#ffffff'
+        ctx.font = 'bold 12px monospace'
+        ctx.textAlign = 'center'
+        ctx.fillText(`${i + 1}`, slotX + hotbarSlotSize / 2, slotY - 5)
+
+        // Consumable icon
+        if (consumable) {
+          // Draw a simple icon representation
+          ctx.fillStyle = consumable.rarity === 'legendary' ? '#ff00ff' :
+                         consumable.rarity === 'rare' ? '#4488ff' :
+                         consumable.rarity === 'uncommon' ? '#44ff44' : '#aaaaaa'
+          
+          // Draw item shape based on type
+          const centerX = slotX + hotbarSlotSize / 2
+          const centerY = slotY + hotbarSlotSize / 2
+          
+          ctx.beginPath()
+          ctx.arc(centerX, centerY, 15, 0, Math.PI * 2)
+          ctx.fill()
+
+          // Draw icon letter
+          ctx.fillStyle = '#ffffff'
+          ctx.font = 'bold 14px monospace'
+          ctx.fillText(consumable.name.charAt(0), centerX, centerY + 5)
+        }
+
+        // Cooldown overlay for empty slots or active items
+        if (!consumable) {
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
+          ctx.fillRect(slotX, slotY, hotbarSlotSize, hotbarSlotSize)
+        }
+      }
+
+      // Controls hint (moved up to not overlap with hotbar)
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
-      ctx.fillRect(10, height - 50, 200, 40)
+      ctx.fillRect(10, height - 95, 200, 40)
       ctx.fillStyle = '#888888'
       ctx.font = '10px monospace'
-      ctx.fillText('WASD: Move | SPACE/J: Attack', 15, height - 35)
-      ctx.fillText('SHIFT: Dash | ESC: Pause', 15, height - 20)
+      ctx.textAlign = 'left'
+      ctx.fillText('WASD: Move | SPACE/J: Attack', 15, height - 80)
+      ctx.fillText('SHIFT: Dash | I: Inventory', 15, height - 65)
     }
     
     // Set canvas size
@@ -6193,19 +6367,25 @@ export default function Game() {
       curse: 'border-red-500 bg-red-900/50'
     }
     
-    const renderItemSlot = (item: GameItem | null, slotName: string, index?: number) => (
-      <div 
-        key={`${slotName}-${index}`}
-        className={`w-16 h-16 border-2 rounded-lg flex items-center justify-center cursor-pointer hover:brightness-125 transition-all ${item ? rarityColors[item.rarity] : 'border-gray-600 bg-gray-800/50'}`}
-        title={item ? `${item.name}\n${item.description}` : slotName}
-      >
-        {item ? (
-          <img src={item.icon} alt={item.name} className="w-12 h-12 object-contain" />
-        ) : (
-          <span className="text-gray-500 text-2xl">+</span>
-        )}
-      </div>
-    )
+    const renderItemSlot = (item: GameItem | null, slotName: string, category: string, index?: number) => {
+      const isSelected = selectedSlot?.category === category && selectedSlot?.index === index
+      return (
+        <div 
+          key={`${category}-${index ?? 0}`}
+          onClick={() => handleSlotClick(category, index)}
+          className={`w-16 h-16 border-2 rounded-lg flex items-center justify-center cursor-pointer hover:brightness-125 transition-all 
+            ${item ? rarityColors[item.rarity] : 'border-gray-600 bg-gray-800/50'} 
+            ${isSelected ? 'ring-4 ring-yellow-400 scale-105 z-10' : ''}`}
+          title={item ? `${item.name}\n${item.description}` : slotName}
+        >
+          {item ? (
+            <img src={item.icon} alt={item.name} className="w-12 h-12 object-contain" />
+          ) : (
+            <span className="text-gray-500 text-2xl">+</span>
+          )}
+        </div>
+      )
+    }
     
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-black/90 z-50">
@@ -6215,6 +6395,7 @@ export default function Game() {
             <button 
               onClick={() => {
                 setShowInventory(false)
+                setSelectedSlot(null)
                 gameStateRef.current = 'playing'
                 setGameState('playing')
               }}
@@ -6231,24 +6412,24 @@ export default function Game() {
               
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 uppercase">Weapon</p>
-                {renderItemSlot(inventory.weapon, 'Weapon')}
+                {renderItemSlot(inventory.weapon, 'Weapon', 'weapon')}
               </div>
               
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 uppercase">Artifacts</p>
                 <div className="flex gap-2">
-                  {inventory.artifacts.map((a, i) => renderItemSlot(a, 'Artifact', i))}
+                  {inventory.artifacts.map((a, i) => renderItemSlot(a, 'Artifact', 'artifacts', i))}
                 </div>
               </div>
               
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 uppercase">Trinket</p>
-                {renderItemSlot(inventory.trinket, 'Trinket')}
+                {renderItemSlot(inventory.trinket, 'Trinket', 'trinket')}
               </div>
               
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 uppercase">Curse</p>
-                {renderItemSlot(inventory.curse, 'Curse')}
+                {renderItemSlot(inventory.curse, 'Curse', 'curse')}
               </div>
             </div>
             
@@ -6268,7 +6449,7 @@ export default function Game() {
               
               <h3 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2 mt-4">CONSUMABLES (1-4)</h3>
               <div className="flex gap-2">
-                {inventory.consumables.map((c, i) => renderItemSlot(c, `Slot ${i + 1}`, i))}
+                {inventory.consumables.map((c, i) => renderItemSlot(c, `Slot ${i + 1}`, 'consumables', i))}
               </div>
             </div>
             
@@ -6290,18 +6471,15 @@ export default function Game() {
               </div>
               
               <h3 className="text-lg font-semibold text-gray-300 border-b border-gray-600 pb-2">BACKPACK</h3>
-              <div className="grid grid-cols-4 gap-1">
-                {inventory.backpack.slice(0, 8).map((item, i) => renderItemSlot(item, 'Backpack', i))}
-                {inventory.backpack.length === 0 && (
-                  <p className="text-gray-500 text-sm col-span-4">Empty</p>
-                )}
+              <div className="grid grid-cols-4 gap-2">
+                {inventory.backpack.map((item, i) => renderItemSlot(item, 'Backpack', 'backpack', i))}
               </div>
             </div>
           </div>
           
           {/* Controls hint */}
           <div className="mt-4 text-center text-gray-500 text-xs">
-            <p>Press <span className="text-gray-300">I</span> to close | <span className="text-gray-300">K</span> for Skills | <span className="text-gray-300">1-4</span> to use consumables</p>
+            <p>Click an item to select, then click another slot to swap | Press <span className="text-gray-300">I</span> to close</p>
           </div>
         </div>
       </div>
