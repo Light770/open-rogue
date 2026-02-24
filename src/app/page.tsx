@@ -1655,83 +1655,6 @@ export default function Game() {
   const [selectedSlot, setSelectedSlot] = useState<{ category: string, index?: number } | null>(null)
   const [inventoryVersion, setInventoryVersion] = useState(0)
   
-  const handleSlotClick = useCallback((category: string, index?: number) => {
-    const inventory = inventoryRef.current
-
-    if (!selectedSlot) {
-      // Select the slot if it has an item
-      let item = null
-      if (category === 'weapon') item = inventory.weapon
-      else if (category === 'artifacts') item = inventory.artifacts[index!]
-      else if (category === 'trinket') item = inventory.trinket
-      else if (category === 'curse') item = inventory.curse
-      else if (category === 'consumables') item = inventory.consumables[index!]
-      else if (category === 'backpack') item = inventory.backpack[index!]
-
-      if (item) {
-        setSelectedSlot({ category, index })
-      }
-      return
-    }
-
-    // Swapping logic
-    if (selectedSlot.category === category && selectedSlot.index === index) {
-      setSelectedSlot(null)
-      return
-    }
-
-    // Helper to get item from a slot
-    const getItemAt = (cat: string, idx?: number) => {
-      if (cat === 'weapon') return inventory.weapon
-      if (cat === 'artifacts') return inventory.artifacts[idx!]
-      if (cat === 'trinket') return inventory.trinket
-      if (cat === 'curse') return inventory.curse
-      if (cat === 'consumables') return inventory.consumables[idx!]
-      if (cat === 'backpack') return inventory.backpack[idx!]
-      return null
-    }
-
-    // Helper to set item in a slot
-    const setItemAt = (cat: string, item: GameItem | null, idx?: number) => {
-      if (cat === 'weapon') inventory.weapon = item
-      else if (cat === 'artifacts') inventory.artifacts[idx!] = item
-      else if (cat === 'trinket') inventory.trinket = item
-      else if (cat === 'curse') inventory.curse = item
-      else if (cat === 'consumables') inventory.consumables[idx!] = item
-      else if (cat === 'backpack') inventory.backpack[idx!] = item
-    }
-
-    const item1 = getItemAt(selectedSlot.category, selectedSlot.index)
-    const item2 = getItemAt(category, index)
-
-    // Validation: Check if item1 can go into category
-    if (item1 && category !== 'backpack') {
-        if (category === 'weapon' && item1.category !== 'weapon') return
-        if (category === 'artifacts' && item1.category !== 'artifact') return
-        if (category === 'trinket' && item1.category !== 'trinket') return
-        if (category === 'curse' && item1.category !== 'curse') return
-        if (category === 'consumables' && item1.category !== 'consumable') return
-    }
-    
-    // Validation: Check if item2 can go into selectedSlot.category
-    if (item2 && selectedSlot.category !== 'backpack') {
-        if (selectedSlot.category === 'weapon' && item2.category !== 'weapon') return
-        if (selectedSlot.category === 'artifacts' && item2.category !== 'artifact') return
-        if (selectedSlot.category === 'trinket' && item2.category !== 'trinket') return
-        if (selectedSlot.category === 'curse' && item2.category !== 'curse') return
-        if (selectedSlot.category === 'consumables' && item2.category !== 'consumable') return
-    }
-
-    // Swap
-    setItemAt(selectedSlot.category, item2, selectedSlot.index)
-    setItemAt(category, item1, index)
-
-    setSelectedSlot(null)
-    setInventoryVersion(v => v + 1)
-    recalculateStats()
-    checkSynergies()
-  }, [selectedSlot, recalculateStats, checkSynergies])
-
   // Inventory ref (persists across floors)
   const inventoryRef = useRef<Inventory>({
     weapon: null,
@@ -2531,6 +2454,83 @@ export default function Game() {
     recalculateStats()
     checkSynergies()
   }, [recalculateStats, checkSynergies])
+  
+  const handleSlotClick = useCallback((category: string, index?: number) => {
+    const inventory = inventoryRef.current
+
+    if (!selectedSlot) {
+      // Select the slot if it has an item
+      let item = null
+      if (category === 'weapon') item = inventory.weapon
+      else if (category === 'artifacts') item = inventory.artifacts[index!]
+      else if (category === 'trinket') item = inventory.trinket
+      else if (category === 'curse') item = inventory.curse
+      else if (category === 'consumables') item = inventory.consumables[index!]
+      else if (category === 'backpack') item = inventory.backpack[index!]
+
+      if (item) {
+        setSelectedSlot({ category, index })
+      }
+      return
+    }
+
+    // Swapping logic
+    if (selectedSlot.category === category && selectedSlot.index === index) {
+      setSelectedSlot(null)
+      return
+    }
+
+    // Helper to get item from a slot
+    const getItemAt = (cat: string, idx?: number) => {
+      if (cat === 'weapon') return inventory.weapon
+      if (cat === 'artifacts') return inventory.artifacts[idx!]
+      if (cat === 'trinket') return inventory.trinket
+      if (cat === 'curse') return inventory.curse
+      if (cat === 'consumables') return inventory.consumables[idx!]
+      if (cat === 'backpack') return inventory.backpack[idx!]
+      return null
+    }
+
+    // Helper to set item in a slot
+    const setItemAt = (cat: string, item: GameItem | null, idx?: number) => {
+      if (cat === 'weapon') inventory.weapon = item
+      else if (cat === 'artifacts') inventory.artifacts[idx!] = item
+      else if (cat === 'trinket') inventory.trinket = item
+      else if (cat === 'curse') inventory.curse = item
+      else if (cat === 'consumables') inventory.consumables[idx!] = item
+      else if (cat === 'backpack') inventory.backpack[idx!] = item
+    }
+
+    const item1 = getItemAt(selectedSlot.category, selectedSlot.index)
+    const item2 = getItemAt(category, index)
+
+    // Validation: Check if item1 can go into category
+    if (item1 && category !== 'backpack') {
+        if (category === 'weapon' && item1.category !== 'weapon') return
+        if (category === 'artifacts' && item1.category !== 'artifact') return
+        if (category === 'trinket' && item1.category !== 'trinket') return
+        if (category === 'curse' && item1.category !== 'curse') return
+        if (category === 'consumables' && item1.category !== 'consumable') return
+    }
+    
+    // Validation: Check if item2 can go into selectedSlot.category
+    if (item2 && selectedSlot.category !== 'backpack') {
+        if (selectedSlot.category === 'weapon' && item2.category !== 'weapon') return
+        if (selectedSlot.category === 'artifacts' && item2.category !== 'artifact') return
+        if (selectedSlot.category === 'trinket' && item2.category !== 'trinket') return
+        if (selectedSlot.category === 'curse' && item2.category !== 'curse') return
+        if (selectedSlot.category === 'consumables' && item2.category !== 'consumable') return
+    }
+
+    // Swap
+    setItemAt(selectedSlot.category, item2, selectedSlot.index)
+    setItemAt(category, item1, index)
+
+    setSelectedSlot(null)
+    setInventoryVersion(v => v + 1)
+    recalculateStats()
+    checkSynergies()
+  }, [selectedSlot, recalculateStats, checkSynergies])
   
   // Unlock a skill
   const unlockSkill = useCallback((skillId: string) => {
